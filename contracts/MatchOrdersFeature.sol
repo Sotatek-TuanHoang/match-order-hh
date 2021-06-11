@@ -146,7 +146,7 @@ contract MatchOrdersFeature is
         LibSignature.Signature memory rightSignature,
         bool shouldMaximallyFillOrders
     )
-        internal
+        private
         returns (LibNativeOrder.MatchedFillResults memory matchedFillResults)
     {
         // We assume that rightOrder.takerAssetData == leftOrder.makerAssetData and rightOrder.makerAssetData == leftOrder.takerAssetData
@@ -510,7 +510,7 @@ contract MatchOrdersFeature is
         address takerAddress,
         LibNativeOrder.MatchedFillResults memory matchedFillResults
     )
-        internal
+        private
     {
         address leftMakerAddress = leftOrder.maker;
         address rightMakerAddress = rightOrder.maker;
@@ -620,7 +620,7 @@ contract MatchOrdersFeature is
         uint256 orderTakerAssetFilledAmount,
         LibNativeOrder.FillResults memory fillResults
     )
-    internal
+    private
     {
 
         LibNativeOrdersStorage

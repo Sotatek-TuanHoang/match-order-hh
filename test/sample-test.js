@@ -1,28 +1,27 @@
 const { expect } = require("chai");
 
-describe("Greeter", function() {
+describe("MatchOrderFullFillTwoSide", function() {
   it("Should return the new greeting once it's changed", async function() {
-    const Greeter = await ethers.getContractFactory("MatchOrdersFeature");
-    const greeter = await Greeter.deploy("0xd8a9465307a1bb5a2b7a4ed511ffae175b7d9bac");
+    const MatchOrdersFeature = await ethers.getContractFactory("MatchOrdersFeature");
+    const matchOrdersFeature = await MatchOrdersFeature.deploy("0xd8a9465307a1bb5a2b7a4ed511ffae175b7d9bac");
     
-    const leftOrder ={
+    const leftOrder =  {
       makerToken: '0x849766c564ed666e198ea5ae42a4223b95faf64a',
       takerToken: '0x0e4355d3cB1796Bcf695c3172c43a151FBFDE367',
       makerAmount: '1000000000000000000',
       takerAmount: '1000000000000000000',
       maker: '0xF54b3294616d39749732Ac74F234F46C9ABf29C4',
       taker: '0x0000000000000000000000000000000000000000',
-      pool: '0x08e03105d5316a63f7ad76055fd1c914f92e5df176eee9f4d1d2f73f230619e6',
-      expiry: 1623422549,
-      salt: '58029194395013538598904475410689725043387451188159321018321111529221029444680',
+      pool: '0x5c6958f67b2c4c79cd9c7ec5f809cfc66da662039e3b82e6b98ef21428a0afd2',
+      expiry: 1666586343,
+      salt: '60201431490906934949084609448663233193267165660311320672636667079700383387797',
       chainId: 15,
       verifyingContract: '0xd8a9465307a1bb5a2b7a4ed511ffae175b7d9bac',
       takerTokenFeeAmount: 0,
       sender: '0x0000000000000000000000000000000000000000',
       feeRecipient: '0x0000000000000000000000000000000000000000'
     }
-  
-  
+
     const rightOrder = {
       makerToken: '0x0e4355d3cB1796Bcf695c3172c43a151FBFDE367',
       takerToken: '0x849766c564ed666e198ea5ae42a4223b95faf64a',
@@ -30,34 +29,85 @@ describe("Greeter", function() {
       takerAmount: '1000000000000000000',
       maker: '0xBdD34ca459A9Ff4B673aC398F856c0A24F408963',
       taker: '0x0000000000000000000000000000000000000000',
-      pool: '0x4e5235272ee47a7090a35324922616bd7e20baac3cc137b14c3c6ff7c467d233',
-      expiry: 1623421773,
-      salt: '27513909888570048402289410100575645630836285617519850957248424819823924198883',
+      pool: '0x8ecefe8b3e62acb95f755278951f7996a94fc00677115d6b7491090811dd3c15',
+      expiry: 1666586343,
+      salt: '72202544363047600315244214924352021656016615075980946171182803111939818896705',
       chainId: 15,
       verifyingContract: '0xd8a9465307a1bb5a2b7a4ed511ffae175b7d9bac',
       takerTokenFeeAmount: 0,
       sender: '0x0000000000000000000000000000000000000000',
       feeRecipient: '0x0000000000000000000000000000000000000000'
     }
-  
-  
 
     const leftSignature = {
-      r: '0xb6196ce3604bcb92a089d5b3da8f55309c826a8d4c769fe0c12e29c9d8ee5f7d',
-      s: '0x68005c5e06e7ffd22f88bffaaa8f5c1c44e380d5a6a407c10ecf3c7cc6b06111',
       v: 28,
+      r: '0x3d9ea168d97a6d58dc7d1db3e621b81b2e70c6b8573ddb761dc8ae8d6ed3befb',
+      s: '0x26093170b26917c1dd43393eae637329079e2e6f987bd592eb96646d5a2bb7d7',
       signatureType: 2
     }
 
     const rightSignature = {
       v: 27,
-      r: '0x4d30cafe48b16b8166199f6e60ae21b78e3b1d985a6a46f2e8d2ba1e28a9d2a3',
-      s: '0x113942ac8d66c966c6c527bc5b314e28f913c78a2b71c3fd8540591d9390a4a6',
+      r: '0x5354ad68dbe8fe8f5d23fa2be26458fbdf377fb5726d96c4b34bd42dfc13f7bb',
+      s: '0x516690c844feee7c46d761643e13c5739af7a6a8a4af79cccc6581d1b45fa56d',
       signatureType: 2
     }
-    console.log("deploy done");
+    console.log(await matchOrdersFeature.matchOrders(leftOrder, rightOrder, leftSignature, rightSignature));
+  });
+});
 
+describe("MatchOrderFullFillTwoSide", function() {
+  it("Should return the new greeting once it's changed", async function() {
+    const MatchOrdersFeature = await ethers.getContractFactory("MatchOrdersFeature");
+    const matchOrdersFeature = await MatchOrdersFeature.deploy("0xd8a9465307a1bb5a2b7a4ed511ffae175b7d9bac");
+    
+    const leftOrder =  {
+      makerToken: '0x849766c564ed666e198ea5ae42a4223b95faf64a',
+      takerToken: '0x0e4355d3cB1796Bcf695c3172c43a151FBFDE367',
+      makerAmount: '1000000000000000000',
+      takerAmount: '1000000000000000000',
+      maker: '0xF54b3294616d39749732Ac74F234F46C9ABf29C4',
+      taker: '0x0000000000000000000000000000000000000000',
+      pool: '0x5c6958f67b2c4c79cd9c7ec5f809cfc66da662039e3b82e6b98ef21428a0afd2',
+      expiry: 1666586343,
+      salt: '60201431490906934949084609448663233193267165660311320672636667079700383387797',
+      chainId: 15,
+      verifyingContract: '0xd8a9465307a1bb5a2b7a4ed511ffae175b7d9bac',
+      takerTokenFeeAmount: 0,
+      sender: '0x0000000000000000000000000000000000000000',
+      feeRecipient: '0x0000000000000000000000000000000000000000'
+    }
 
-    console.log(await greeter.matchOrders(leftOrder, rightOrder, leftSignature, rightSignature));
+    const rightOrder = {
+      makerToken: '0x0e4355d3cB1796Bcf695c3172c43a151FBFDE367',
+      takerToken: '0x849766c564ed666e198ea5ae42a4223b95faf64a',
+      makerAmount: '1000000000000000000',
+      takerAmount: '1000000000000000000',
+      maker: '0xBdD34ca459A9Ff4B673aC398F856c0A24F408963',
+      taker: '0x0000000000000000000000000000000000000000',
+      pool: '0x8ecefe8b3e62acb95f755278951f7996a94fc00677115d6b7491090811dd3c15',
+      expiry: 1666586343,
+      salt: '72202544363047600315244214924352021656016615075980946171182803111939818896705',
+      chainId: 15,
+      verifyingContract: '0xd8a9465307a1bb5a2b7a4ed511ffae175b7d9bac',
+      takerTokenFeeAmount: 0,
+      sender: '0x0000000000000000000000000000000000000000',
+      feeRecipient: '0x0000000000000000000000000000000000000000'
+    }
+
+    const leftSignature = {
+      v: 28,
+      r: '0x3d9ea168d97a6d58dc7d1db3e621b81b2e70c6b8573ddb761dc8ae8d6ed3befb',
+      s: '0x26093170b26917c1dd43393eae637329079e2e6f987bd592eb96646d5a2bb7d7',
+      signatureType: 2
+    }
+
+    const rightSignature = {
+      v: 27,
+      r: '0x5354ad68dbe8fe8f5d23fa2be26458fbdf377fb5726d96c4b34bd42dfc13f7bb',
+      s: '0x516690c844feee7c46d761643e13c5739af7a6a8a4af79cccc6581d1b45fa56d',
+      signatureType: 2
+    }
+    console.log(await matchOrdersFeature.matchOrders(leftOrder, rightOrder, leftSignature, rightSignature));
   });
 });
