@@ -1,6 +1,6 @@
-"#!/bin/sh
+#!/bin/sh
 set -e
-echo ""CI start""
+echo "CI start"
 ls -la
 
-echo ""CI end"""
+echo "CI end"

@@ -1,6 +1,6 @@
-"#!/bin/sh
+#!/bin/sh
 set -e
-echo ""CD start""
+echo "CD start"
 ls -la
 
-echo ""CD end"""
+echo "CD end"
