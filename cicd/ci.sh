@@ -1,6 +1,6 @@
 #!/bin/sh
 set -e
 echo "CI start1"
-ls -------la
+hahaha
 
 echo "CI end"
