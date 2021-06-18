@@ -1,7 +1,8 @@
 pragma solidity ^0.6.5;
 pragma experimental ABIEncoderV2;
+import "hardhat/console.sol";
 
-contract OwnableFeatureInterface {
+interface OwnableFeatureInterface {
     /// @dev Emitted when `migrate()` is called.
     /// @param caller The caller of `migrate()`.
     /// @param migrator The migration contract.
@@ -17,25 +18,23 @@ contract OwnableFeatureInterface {
     /// @param newOwner The address of the new owner.
     /// @param data The call data.
     function migrate(address target, bytes calldata data, address newOwner) external;
+    function transferOwnership(address newOwner) external;
 }
 
-contract FeatureInterface {
+interface FeatureInterface {
     function migrate() external returns (bytes4 success);
 }
 
 contract AddFeature {
-    OwnableFeatureInterface ownableFeature;
-    FeatureInterface feature;
-    
-    constructor(
-        address featureAddress,
-        address ownableFeatureAddress
-    )
-    public {
-        ownableFeature = OwnableFeatureInterface(ownableFeatureAddress);
-        feature = FeatureInterface(featureAddress);
-    }
 
+    // constructor(
+    //     address zeroExAddress,
+    //     address featureAddress,
+    //     address ownableFeatureAddress
+    // )
+    // public {
+    //     addNewFeature(zeroExAddress, featureAddress, ownableFeatureAddress);
+    // }
     function die(address payable ethRecipient)
         public
         virtual
@@ -46,18 +45,22 @@ contract AddFeature {
         selfdestruct(ethRecipient);
     }
 
-    function addFeature(
+    function addNewFeature(
         address zeroExAddress,
         address featureAddress,
         address ownableFeatureAddress
     )
     external
     returns (bool rs) {
+
+        OwnableFeatureInterface ownableFeature = OwnableFeatureInterface(ownableFeatureAddress);
+        FeatureInterface feature = FeatureInterface(featureAddress);
         ownableFeature.migrate(
             featureAddress, 
             abi.encodeWithSelector(feature.migrate.selector),
-            msg.sender
+            address(this)
         );
+        ownableFeature.transferOwnership(msg.sender);
         die(msg.sender);
         return true;
     }
