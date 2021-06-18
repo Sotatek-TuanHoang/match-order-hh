@@ -1,6 +1,6 @@
 #!/bin/sh
 set -e
 echo "CI start1"
-hahaha
+yarn lint
 
 echo "CI end"
