@@ -1,6 +1,6 @@
 #!/bin/sh
 set -e
 echo "CI start1"
-echo $BRANCH_NAME
+hahahahahaha
 
 echo "CI end"
