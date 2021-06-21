@@ -83,6 +83,7 @@ library LibNativeOrder {
         uint256 sellTakerRemainingAmountAfterMatch;
         uint256 buyMakerRemainingAmountAfterMatch;
         uint256 buyTakerRemainingAmountAfterMatch;
+        uint256 changeMakerTokenForTaker;
     }
 
     uint256 private constant UINT_128_MASK = (1 << 128) - 1;

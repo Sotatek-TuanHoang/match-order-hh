@@ -1,6 +1,10 @@
 const { expect } = require("chai");
 
 
+
+
+//test case in https://docs.google.com/spreadsheets/d/1gA-Vxzyz1EohWYkEXRB4iCcTfEIgS9vxYwNEGtWkIPk/edit?usp=sharing
+
 describe("MatchOrderFullFillTwoSide", function() {
   it("Should return the new greeting once it's changed", async function() {
     const MatchOrdersFeature = await ethers.getContractFactory("MatchOrdersFeature");
@@ -9,8 +13,8 @@ describe("MatchOrderFullFillTwoSide", function() {
     const leftOrder =  {
       makerToken: '0x849766c564ed666e198ea5ae42a4223b95faf64a',
       takerToken: '0x0e4355d3cB1796Bcf695c3172c43a151FBFDE367',
-      makerAmount: '1000000000000000000',
-      takerAmount: '1000000000000000000',
+      makerAmount: '3000', // change for test
+      takerAmount: '18000', // change for test
       maker: '0xF54b3294616d39749732Ac74F234F46C9ABf29C4',
       taker: '0x0000000000000000000000000000000000000000',
       pool: '0x5c6958f67b2c4c79cd9c7ec5f809cfc66da662039e3b82e6b98ef21428a0afd2',
@@ -18,16 +22,16 @@ describe("MatchOrderFullFillTwoSide", function() {
       salt: '60201431490906934949084609448663233193267165660311320672636667079700383387797',
       chainId: 15,
       verifyingContract: '0xd8a9465307a1bb5a2b7a4ed511ffae175b7d9bac',
-      takerTokenFeeAmount: 0,
+      takerTokenFeeAmount: '100', // change for test
       sender: '0x0000000000000000000000000000000000000000',
-      feeRecipient: '0x0000000000000000000000000000000000000000'
+      feeRecipient: '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266'
     }
 
     const rightOrder = {
       makerToken: '0x0e4355d3cB1796Bcf695c3172c43a151FBFDE367',
       takerToken: '0x849766c564ed666e198ea5ae42a4223b95faf64a',
-      makerAmount: '1000000000000000000',
-      takerAmount: '1000000000000000000',
+      makerAmount: '26000', // change for test
+      takerAmount: '4000', // change for test
       maker: '0xBdD34ca459A9Ff4B673aC398F856c0A24F408963',
       taker: '0x0000000000000000000000000000000000000000',
       pool: '0x8ecefe8b3e62acb95f755278951f7996a94fc00677115d6b7491090811dd3c15',
@@ -35,9 +39,9 @@ describe("MatchOrderFullFillTwoSide", function() {
       salt: '72202544363047600315244214924352021656016615075980946171182803111939818896705',
       chainId: 15,
       verifyingContract: '0xd8a9465307a1bb5a2b7a4ed511ffae175b7d9bac',
-      takerTokenFeeAmount: 0,
+      takerTokenFeeAmount: '200', // change for test
       sender: '0x0000000000000000000000000000000000000000',
-      feeRecipient: '0x0000000000000000000000000000000000000000'
+      feeRecipient: '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266'
     }
 
     const leftSignature = {

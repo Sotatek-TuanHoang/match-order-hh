@@ -32,6 +32,7 @@ import "./libs/LibSafeMathV06.sol";
 import "./libs/IERC20TokenV06.sol";
 import "./libs/IMatchOrdersFeature.sol";
 import "./libs/IFeature.sol";
+import "hardhat/console.sol";
 
 contract MatchOrdersFeature is
     IFeature,
@@ -121,13 +122,12 @@ contract MatchOrdersFeature is
     /// @param buyOrder Second order to match.
     /// @param sellSignature Proof that order was created by the sell maker.
     /// @param buySignature Proof that order was created by the buy maker.
-    /// @param shouldMaximallyFillOrders Indicates whether or not the maximal fill matching strategy should be used
     /// @return matchedFillResults Amounts filled and fees paid by maker and taker of matched orders.
     function _matchOrders(
         LibNativeOrder.LimitOrder memory sellOrder,
         LibNativeOrder.LimitOrder memory buyOrder,
         LibSignature.Signature memory sellSignature,
-        LibSignature.Signature memory buySignature,
+        LibSignature.Signature memory buySignature
     )
         private
         returns (LibNativeOrder.MatchedFillResults memory matchedFillResults)
@@ -170,7 +170,7 @@ contract MatchOrdersFeature is
             sellOrder,
             buyOrder,
             sellOrderInfo.takerTokenFilledAmount,
-            buyOrderInfo.takerTokenFilledAmount,
+            buyOrderInfo.takerTokenFilledAmount
         );
 
         // Update exchange state
@@ -179,14 +179,18 @@ contract MatchOrdersFeature is
             takerAddress,
             sellOrderInfo.orderHash,
             sellOrderInfo.takerTokenFilledAmount,
-            sellTakerRemainingAmountAfterMatch
+            matchedFillResults.makerAmountFinal,
+            matchedFillResults.takerAmountFinal,
+            matchedFillResults.sellTakerRemainingAmountAfterMatch
         );
         _updateFilledState(
             buyOrder,
             takerAddress,
             buyOrderInfo.orderHash,
             buyOrderInfo.takerTokenFilledAmount,
-            buyTakerRemainingAmountAfterMatch
+            matchedFillResults.makerAmountFinal,
+            matchedFillResults.takerAmountFinal,
+            matchedFillResults.buyTakerRemainingAmountAfterMatch
         );
 
         // Settle matched orders. Succeeds or throws.
@@ -290,7 +294,7 @@ contract MatchOrdersFeature is
         LibNativeOrder.LimitOrder memory sellOrder,
         LibNativeOrder.LimitOrder memory buyOrder,
         uint256 sellOrderTakerAssetFilledAmount,
-        uint256 buyOrderTakerAssetFilledAmount,
+        uint256 buyOrderTakerAssetFilledAmount
     )
     internal
     pure
@@ -344,65 +348,27 @@ contract MatchOrdersFeature is
             matchedFillResults.buyMakerRemainingAmountAfterMatch = 0;
             matchedFillResults.sellMakerRemainingAmountAfterMatch = sellMakerAssetAmountRemaining.safeSub(buyTakerAssetAmountRemaining);
             matchedFillResults.sellTakerRemainingAmountAfterMatch = priceFinal.safeMul(matchedFillResults.sellMakerRemainingAmountAfterMatch);
+            matchedFillResults.changeMakerTokenForTaker = buyMakerAssetAmountRemaining.safeSub(matchedFillResults.takerAmountFinal);
 
         } else {
             matchedFillResults.makerAmountFinal = sellMakerAssetAmountRemaining;
             matchedFillResults.takerAmountFinal = sellTakerAssetAmountRemaining;
             matchedFillResults.sellMakerRemainingAmountAfterMatch = 0;
             matchedFillResults.sellTakerRemainingAmountAfterMatch = 0;
-            matchedFillResults.buyTakerRemainingAmountAfterMatch = buyTakerAssetAmountRemaining.safeSub(sellMakerAssetAmountRemaining);
+            matchedFillResults.buyTakerRemainingAmountAfterMatch = buyTakerAssetAmountRemaining.safeSub(matchedFillResults.makerAmountFinal);
             matchedFillResults.buyMakerRemainingAmountAfterMatch = LibMathV06.safeGetPartialAmountFloor(
                 buyMakerAssetAmountRemaining,
                 buyTakerAssetAmountRemaining,
                 matchedFillResults.buyTakerRemainingAmountAfterMatch
             );
+            matchedFillResults.changeMakerTokenForTaker = buyMakerAssetAmountRemaining
+                                                            .safeSub(matchedFillResults.takerAmountFinal)
+                                                            .safeSub(matchedFillResults.buyMakerRemainingAmountAfterMatch);
         }
 
         return matchedFillResults;
     }
 
-    function _calculateCompletebuyFill(
-        LibNativeOrder.LimitOrder memory sellOrder,
-        uint256 buyMakerAssetAmountRemaining,
-        uint256 buyTakerAssetAmountRemaining
-    )
-    private
-    pure
-    returns (LibNativeOrder.MatchedFillResults memory matchedFillResults)
-    {
-        matchedFillResults.buy.makerAssetFilledAmount = buyMakerAssetAmountRemaining;
-        matchedFillResults.buy.takerAssetFilledAmount = buyTakerAssetAmountRemaining;
-        matchedFillResults.sell.takerAssetFilledAmount = buyMakerAssetAmountRemaining;
-        // Round down to ensure the sell maker's exchange rate does not exceed the price specified by the order.
-        // We favor the sell maker when the exchange rate must be rounded and the profit is being paid in the
-        // sell maker asset.
-        matchedFillResults.sell.makerAssetFilledAmount = LibMathV06.safeGetPartialAmountFloor(
-            sellOrder.makerAmount,
-            sellOrder.takerAmount,
-            buyMakerAssetAmountRemaining
-        );
-
-        return matchedFillResults;
-    }
-
-    function _calculateCompleteFillBoth(
-        uint256 sellMakerAssetAmountRemaining,
-        uint256 sellTakerAssetAmountRemaining,
-        uint256 buyMakerAssetAmountRemaining,
-        uint256 buyTakerAssetAmountRemaining
-    )
-    private
-    pure
-    returns (LibNativeOrder.MatchedFillResults memory matchedFillResults)
-    {
-        // Calculate the fully filled results for both orders.
-        matchedFillResults.sell.makerAssetFilledAmount = sellMakerAssetAmountRemaining;
-        matchedFillResults.sell.takerAssetFilledAmount = sellTakerAssetAmountRemaining;
-        matchedFillResults.buy.makerAssetFilledAmount = buyMakerAssetAmountRemaining;
-        matchedFillResults.buy.takerAssetFilledAmount = buyTakerAssetAmountRemaining;
-
-        return matchedFillResults;
-    }
     /// @dev Settles matched order by transferring appropriate funds between order makers, taker, and fee recipient.
     /// @param sellOrderHash First matched order hash.
     /// @param buyOrderHash Second matched order hash.
@@ -425,19 +391,61 @@ contract MatchOrdersFeature is
         address sellFeeRecipientAddress = sellOrder.feeRecipient;
         address buyFeeRecipientAddress = buyOrder.feeRecipient;
 
+        console.log('sell maker');
+        console.log(sellOrder.makerAmount);
+
+        console.log('sell taker');
+        console.log(sellOrder.takerAmount);
+        
+        console.log('buy maker');
+        console.log(buyOrder.makerAmount);
+
+        console.log('buy taker');
+        console.log(buyOrder.takerAmount);
+
+        console.log('maker final');
+        console.log(matchedFillResults.makerAmountFinal);
+        
+        console.log('taker final');
+        console.log(matchedFillResults.takerAmountFinal);
+
+        console.log('change maker to buy');
+        console.log(matchedFillResults.changeMakerTokenForTaker);
+
+        console.log('sell taker fee');
+        console.log(sellOrder.takerTokenFeeAmount);
+
+        console.log('buy taker fee');
+        console.log(buyOrder.takerTokenFeeAmount);
+        
+        console.log('sell remaining taker');
+        console.log(matchedFillResults.sellTakerRemainingAmountAfterMatch);
+        
+        console.log('buy remaining taker');
+        console.log(matchedFillResults.buyTakerRemainingAmountAfterMatch);
+
+        console.log('sell receive');
+        console.log(matchedFillResults.takerAmountFinal.safeSub(sellOrder.takerTokenFeeAmount));
+
+        console.log('buy receive');
+        console.log(matchedFillResults.makerAmountFinal.safeSub(buyOrder.takerTokenFeeAmount));
+
         _transferERC20Tokens(
             buyOrder.makerToken,
             buyMakerAddress,
             sellMakerAddress,
-            matchedFillResults.makerAmountFinal.safeSub(sellOrder.takerTokenFeeAmount)
+            matchedFillResults.takerAmountFinal.safeSub(sellOrder.takerTokenFeeAmount)
         );
+
+
 
         _transferERC20Tokens(
             sellOrder.makerToken,
             sellMakerAddress,
             buyMakerAddress,
-            matchedFillResults.takerAmountFinal.safeSub(buyOrder.takerTokenFeeAmount)
+            matchedFillResults.makerAmountFinal.safeSub(buyOrder.takerTokenFeeAmount)
         );
+
 
 
         //fee for each order
@@ -455,62 +463,15 @@ contract MatchOrdersFeature is
             sellOrder.takerTokenFeeAmount
         );
 
-        //return change for each side.
-        _transferERC20Tokens(
-            sellOrder.makerToken,
-            sellMakerAddress,
-            takerAddress,
-            matchedFillResults.profitInsellMakerAsset
-        );
+        //return change for each side (using for lock balance after).
 
-        _transferERC20Tokens(
-            buyOrder.makerToken,
-            buyMakerAddress,
-            takerAddress,
-            matchedFillResults.profitInbuyMakerAsset
-        );
+        // _transferERC20Tokens(
+        //     buyOrder.makerToken,
+        //     buyMakerAddress,
+        //     takerAddress,
+        //     matchedFillResults.changeMakerTokenForTaker
+        // );
 
-        //todo: pay protocol
-        bool didPayProtocolFees = false;
-
-        // Protocol fees are not paid if the protocolFeeCollector contract is not set
-        if (!didPayProtocolFees) {
-            matchedFillResults.sell.protocolFeePaid = 0;
-            matchedFillResults.buy.protocolFeePaid = 0;
-        }
-
-        // Settle taker fees.
-        if (
-            sellFeeRecipientAddress == buyFeeRecipientAddress &&
-            sellOrder.takerTokenFeeAmount == buyOrder.takerTokenFeeAmount
-        ) {
-            // Fee recipients and taker fee assets are identical, so we can
-            // transfer them in one go.
-
-            _transferERC20Tokens(
-                sellOrder.makerToken,
-                takerAddress,
-                sellFeeRecipientAddress,
-                matchedFillResults.sell.takerFeePaid.safeAdd(matchedFillResults.buy.takerFeePaid)
-            );
-        } else {
-            // buy taker fee -> buy fee recipient
-
-            _transferERC20Tokens(
-                sellOrder.makerToken,
-                takerAddress,
-                sellFeeRecipientAddress,
-                matchedFillResults.sell.takerFeePaid
-            );
-
-
-            _transferERC20Tokens(
-                buyOrder.takerToken,
-                takerAddress,
-                buyFeeRecipientAddress,
-                matchedFillResults.buy.takerFeePaid
-            );
-        }
     }
 
     function _updateFilledState(
@@ -524,7 +485,6 @@ contract MatchOrdersFeature is
     )
     private
     {
-
         LibNativeOrdersStorage
         .getStorage()
         .orderHashToTakerTokenFilledAmount[orderHash] = takerRemainingAmount;
@@ -550,13 +510,6 @@ contract MatchOrdersFeature is
     {
         _registerFeatureFunction(this.matchOrders.selector);
         _registerFeatureFunction(this.testMatch.selector);
-        // _registerFeatureFunction(this._assertValidMatch.selector);
-        // _registerFeatureFunction(this._matchOrders.selector);
-        // _registerFeatureFunction(this.getOrderInfo.selector);
-        // _registerFeatureFunction(this._assertFillableOrder.selector);
-        // _registerFeatureFunction(this._calculateCompletebuyFill.selector);
-        // _registerFeatureFunction(this._calculateCompleteFillBoth.selector);
-        // _registerFeatureFunction(this._settleMatchedOrders.selector);
         return LibMigrate.MIGRATE_SUCCESS;
     }
 }

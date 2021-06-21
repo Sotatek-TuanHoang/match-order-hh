@@ -12,7 +12,7 @@ require("@nomiclabs/hardhat-waffle");
 
 
 
-const DEPLOYER_PRIVATE_KEY = '0xf5c402199bc8be64eccc697f911beadf321049f8cb466ed8e1a282ba69654592';
+const DEPLOYER_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 // You need to export an object to set up your config
 // Go to https://hardhat.org/config/ to learn more
 
