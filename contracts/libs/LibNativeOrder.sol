@@ -76,19 +76,14 @@ library LibNativeOrder {
         uint128 takerTokenFilledAmount;
     }
 
-    struct FillResults {
-        uint256 makerAssetFilledAmount;  // Total amount of makerAsset(s) filled.
-        uint256 takerAssetFilledAmount;  // Total amount of takerAsset(s) filled.
-        uint256 makerFeePaid;            // Total amount of fees paid by maker(s) to feeRecipient(s).
-        uint256 takerFeePaid;            // Total amount of fees paid by taker to feeRecipients(s).
-        uint256 protocolFeePaid;         // Total amount of fees paid by taker to the staking contract.
-    }
-
     struct MatchedFillResults {
-        FillResults left;                // Amounts filled and fees paid of left order.
-        FillResults right;               // Amounts filled and fees paid of right order.
-        uint256 profitInLeftMakerAsset;  // Profit taken from the left maker
-        uint256 profitInRightMakerAsset; // Profit taken from the right maker
+        uint256 makerAmountFinal;
+        uint256 takerAmountFinal;
+        uint256 sellMakerRemainingAmountAfterMatch;
+        uint256 sellTakerRemainingAmountAfterMatch;
+        uint256 buyMakerRemainingAmountAfterMatch;
+        uint256 buyTakerRemainingAmountAfterMatch;
+        uint256 changeMakerTokenForTaker;
     }
 
     uint256 private constant UINT_128_MASK = (1 << 128) - 1;

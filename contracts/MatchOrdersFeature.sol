@@ -1,6 +1,6 @@
 /*
 
-  Copyright 2019 ZeroEx Intl.
+  Copybuy 2019 ZeroEx Intl.
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ import "./libs/LibSafeMathV06.sol";
 import "./libs/IERC20TokenV06.sol";
 import "./libs/IMatchOrdersFeature.sol";
 import "./libs/IFeature.sol";
+import "hardhat/console.sol";
 
 contract MatchOrdersFeature is
     IFeature,
@@ -43,21 +44,6 @@ contract MatchOrdersFeature is
     using LibBytesV06 for bytes;
     using LibSafeMathV06 for uint256;
     using LibSafeMathV06 for uint128;
-
-    event Fill(
-        address indexed makerAddress,         // Address that created the order.
-        address indexed feeRecipientAddress,  // Address that received fees.
-        IERC20TokenV06 makerToken,                 // Encoded data specific to makerAsset.
-        IERC20TokenV06 takerToken,                 // Encoded data specific to takerAsset.
-        bytes32 indexed orderHash,            // EIP712 hash of order (see LibOrder.getTypedDataHash).
-        address takerAddress,                 // Address that filled the order.
-        address senderAddress,                // Address that called the Exchange contract (msg.sender).
-        uint256 makerAssetFilledAmount,       // Amount of makerAsset sold by maker and bought by taker.
-        uint256 takerAssetFilledAmount,       // Amount of takerAsset sold by taker and bought by maker.
-        uint256 makerFeePaid,                 // Amount of makerFeeAssetData paid to feeRecipient by maker.
-        uint256 takerFeePaid,                 // Amount of takerFeeAssetData paid to feeRecipient by taker.
-        uint256 protocolFeePaid               // Amount of eth or weth paid to the staking contract.
-    );
 
     string public constant override FEATURE_NAME = "MatchOrders";
     /// @dev Version of this feature.
@@ -77,10 +63,10 @@ contract MatchOrdersFeature is
     }
 
     function matchOrders(
-        LibNativeOrder.LimitOrder calldata leftOrder,
-        LibNativeOrder.LimitOrder calldata rightOrder,
-        LibSignature.Signature calldata leftSignature,
-        LibSignature.Signature calldata rightSignature
+        LibNativeOrder.LimitOrder calldata sellOrder,
+        LibNativeOrder.LimitOrder calldata buyOrder,
+        LibSignature.Signature calldata sellSignature,
+        LibSignature.Signature calldata buySignature
     )
         external
         override
@@ -89,23 +75,22 @@ contract MatchOrdersFeature is
         returns (LibNativeOrder.MatchedFillResults memory matchedFillResults)
     {
         return _matchOrders(
-            leftOrder,
-            rightOrder,
-            leftSignature,
-            rightSignature,
-            false
+            sellOrder,
+            buyOrder,
+            sellSignature,
+            buySignature
         );
     }
     /// @dev Validates context for matchOrders. Succeeds or throws.
-    /// @param leftOrder First order to match.
-    /// @param rightOrder Second order to match.
-    /// @param leftOrderHash First matched order hash.
-    /// @param rightOrderHash Second matched order hash.
+    /// @param sellOrder First order to match.
+    /// @param buyOrder Second order to match.
+    /// @param sellOrderHash First matched order hash.
+    /// @param buyOrderHash Second matched order hash.
     function _assertValidMatch(
-        LibNativeOrder.LimitOrder memory leftOrder,
-        LibNativeOrder.LimitOrder memory rightOrder,
-        bytes32 leftOrderHash,
-        bytes32 rightOrderHash
+        LibNativeOrder.LimitOrder memory sellOrder,
+        LibNativeOrder.LimitOrder memory buyOrder,
+        bytes32 sellOrderHash,
+        bytes32 buyOrderHash
     )
         internal
         pure
@@ -114,110 +99,106 @@ contract MatchOrdersFeature is
         // There is a profitable spread iff the cost per unit bought (OrderA.MakerAmount/OrderA.TakerAmount) for each order is greater
         // than the profit per unit sold of the matched order (OrderB.TakerAmount/OrderB.MakerAmount).
         // This is satisfied by the equations below:
-        // <leftOrder.makerAssetAmount> / <leftOrder.takerAssetAmount> >= <rightOrder.takerAssetAmount> / <rightOrder.makerAssetAmount>
+        // <sellOrder.makerAssetAmount> / <sellOrder.takerAssetAmount> >= <buyOrder.takerAssetAmount> / <buyOrder.makerAssetAmount>
         // AND
-        // <rightOrder.makerAssetAmount> / <rightOrder.takerAssetAmount> >= <leftOrder.takerAssetAmount> / <leftOrder.makerAssetAmount>
+        // <buyOrder.makerAssetAmount> / <buyOrder.takerAssetAmount> >= <sellOrder.takerAssetAmount> / <sellOrder.makerAssetAmount>
         // These equations can be combined to get the following:
-        if (leftOrder.makerAmount.safeMul128(rightOrder.makerAmount) <
-            leftOrder.takerAmount.safeMul128(rightOrder.takerAmount)) {
+        if (sellOrder.makerAmount.safeMul128(buyOrder.makerAmount) <
+            sellOrder.takerAmount.safeMul128(buyOrder.takerAmount)) {
             LibRichErrors.rrevert(LibExchangeRichErrors.NegativeSpreadError(
-                leftOrderHash,
-                rightOrderHash
+                sellOrderHash,
+                buyOrderHash
             ));
         }
     }
 
     /// @dev Match two complementary orders that have a profitable spread.
     ///      Each order is filled at their respective price point. However, the calculations are
-    ///      carried out as though the orders are both being filled at the right order's price point.
-    ///      The profit made by the left order goes to the taker (who matched the two orders). This
+    ///      carried out as though the orders are both being filled at the buy order's price point.
+    ///      The profit made by the sell order goes to the taker (who matched the two orders). This
     ///      function is needed to allow for reentrant order matching (used by `batchMatchOrders` and
     ///      `batchMatchOrdersWithMaximalFill`).
-    /// @param leftOrder First order to match.
-    /// @param rightOrder Second order to match.
-    /// @param leftSignature Proof that order was created by the left maker.
-    /// @param rightSignature Proof that order was created by the right maker.
-    /// @param shouldMaximallyFillOrders Indicates whether or not the maximal fill matching strategy should be used
+    /// @param sellOrder First order to match.
+    /// @param buyOrder Second order to match.
+    /// @param sellSignature Proof that order was created by the sell maker.
+    /// @param buySignature Proof that order was created by the buy maker.
     /// @return matchedFillResults Amounts filled and fees paid by maker and taker of matched orders.
     function _matchOrders(
-        LibNativeOrder.LimitOrder memory leftOrder,
-        LibNativeOrder.LimitOrder memory rightOrder,
-        LibSignature.Signature memory leftSignature,
-        LibSignature.Signature memory rightSignature,
-        bool shouldMaximallyFillOrders
+        LibNativeOrder.LimitOrder memory sellOrder,
+        LibNativeOrder.LimitOrder memory buyOrder,
+        LibSignature.Signature memory sellSignature,
+        LibSignature.Signature memory buySignature
     )
         private
         returns (LibNativeOrder.MatchedFillResults memory matchedFillResults)
     {
-        // We assume that rightOrder.takerAssetData == leftOrder.makerAssetData and rightOrder.makerAssetData == leftOrder.takerAssetData
+        // We assume that buyOrder.takerAssetData == sellOrder.makerAssetData and buyOrder.makerAssetData == sellOrder.takerAssetData
         // by pointing these values to the same location in memory. This is cheaper than checking equality.
         // If this assumption isn't true, the match will fail at signature validation.
-        rightOrder.makerToken = leftOrder.takerToken;
-        rightOrder.takerToken = leftOrder.makerToken;
+        buyOrder.makerToken = sellOrder.takerToken;
+        buyOrder.takerToken = sellOrder.makerToken;
 
-        // Get left & right order info
-        LibNativeOrder.OrderInfo memory leftOrderInfo = getOrderInfo(leftOrder);
-        LibNativeOrder.OrderInfo memory rightOrderInfo = getOrderInfo(rightOrder);
+        // Get sell & buy order info
+        LibNativeOrder.OrderInfo memory sellOrderInfo = getOrderInfo(sellOrder);
+        LibNativeOrder.OrderInfo memory buyOrderInfo = getOrderInfo(buyOrder);
 
         // Fetch taker address
         address takerAddress = msg.sender;
 
         // Either our context is valid or we revert
         _assertFillableOrder(
-            leftOrder,
-            leftOrderInfo,
+            sellOrder,
+            sellOrderInfo,
             takerAddress,
-            leftSignature
+            sellSignature
         );
         _assertFillableOrder(
-            rightOrder,
-            rightOrderInfo,
+            buyOrder,
+            buyOrderInfo,
             takerAddress,
-            rightSignature
+            buySignature
         );
         _assertValidMatch(
-            leftOrder,
-            rightOrder,
-            leftOrderInfo.orderHash,
-            rightOrderInfo.orderHash
+            sellOrder,
+            buyOrder,
+            sellOrderInfo.orderHash,
+            buyOrderInfo.orderHash
         );
-
-        //todo: change value
-        uint protocolFeeMultiplier = 100;
 
         // Compute proportional fill amounts
         matchedFillResults = calculateMatchedFillResults(
-            leftOrder,
-            rightOrder,
-            leftOrderInfo.takerTokenFilledAmount,
-            rightOrderInfo.takerTokenFilledAmount,
-            protocolFeeMultiplier,
-            tx.gasprice,
-            shouldMaximallyFillOrders
+            sellOrder,
+            buyOrder,
+            sellOrderInfo.takerTokenFilledAmount,
+            buyOrderInfo.takerTokenFilledAmount
         );
 
         // Update exchange state
         _updateFilledState(
-            leftOrder,
+            sellOrder,
             takerAddress,
-            leftOrderInfo.orderHash,
-            leftOrderInfo.takerTokenFilledAmount,
-            matchedFillResults.left
+            sellOrderInfo.orderHash,
+            sellOrderInfo.takerTokenFilledAmount,
+            matchedFillResults.makerAmountFinal,
+            matchedFillResults.takerAmountFinal,
+            matchedFillResults.sellTakerRemainingAmountAfterMatch
         );
         _updateFilledState(
-            rightOrder,
+            buyOrder,
             takerAddress,
-            rightOrderInfo.orderHash,
-            rightOrderInfo.takerTokenFilledAmount,
-            matchedFillResults.right
+            buyOrderInfo.orderHash,
+            buyOrderInfo.takerTokenFilledAmount,
+            matchedFillResults.makerAmountFinal,
+            matchedFillResults.takerAmountFinal,
+            matchedFillResults.buyTakerRemainingAmountAfterMatch
         );
 
         // Settle matched orders. Succeeds or throws.
         _settleMatchedOrders(
-            leftOrderInfo.orderHash,
-            rightOrderInfo.orderHash,
-            leftOrder,
-            rightOrder,
+            sellOrderInfo.orderHash,
+            buyOrderInfo.orderHash,
+            sellOrder,
+            buyOrder,
             takerAddress,
             matchedFillResults
         );
@@ -310,307 +291,187 @@ contract MatchOrdersFeature is
     }
 
     function calculateMatchedFillResults(
-        LibNativeOrder.LimitOrder memory leftOrder,
-        LibNativeOrder.LimitOrder memory rightOrder,
-        uint256 leftOrderTakerAssetFilledAmount,
-        uint256 rightOrderTakerAssetFilledAmount,
-        uint256 protocolFeeMultiplier,
-        uint256 gasPrice,
-        bool shouldMaximallyFillOrders
+        LibNativeOrder.LimitOrder memory sellOrder,
+        LibNativeOrder.LimitOrder memory buyOrder,
+        uint256 sellOrderTakerAssetFilledAmount,
+        uint256 buyOrderTakerAssetFilledAmount
     )
     internal
     pure
     returns (LibNativeOrder.MatchedFillResults memory matchedFillResults)
     {
-        // Derive maker asset amounts for left & right orders, given store taker assert amounts
-        uint256 leftTakerAssetAmountRemaining = leftOrder.takerAmount.safeSub(leftOrderTakerAssetFilledAmount);
-        uint256 leftMakerAssetAmountRemaining = LibMathV06.safeGetPartialAmountFloor(
-            leftOrder.makerAmount,
-            leftOrder.takerAmount,
-            leftTakerAssetAmountRemaining
+        // Derive maker asset amounts for sell & buy orders, given store taker assert amounts
+        uint256 sellTakerAssetAmountRemaining = sellOrder.takerAmount.safeSub(sellOrderTakerAssetFilledAmount);
+        uint256 sellMakerAssetAmountRemaining = LibMathV06.safeGetPartialAmountFloor(
+            sellOrder.makerAmount,
+            sellOrder.takerAmount,
+            sellTakerAssetAmountRemaining
         );
-        uint256 rightTakerAssetAmountRemaining = rightOrder.takerAmount.safeSub(rightOrderTakerAssetFilledAmount);
-        uint256 rightMakerAssetAmountRemaining = LibMathV06.safeGetPartialAmountFloor(
-            rightOrder.makerAmount,
-            rightOrder.takerAmount,
-            rightTakerAssetAmountRemaining
-        );
-
-        // Maximally fill the orders and pay out profits to the matcher in one or both of the maker assets.
-        if (shouldMaximallyFillOrders) {
-//            matchedFillResults = _calculateMatchedFillResultsWithMaximalFill(
-//                leftOrder,
-//                rightOrder,
-//                leftMakerAssetAmountRemaining,
-//                leftTakerAssetAmountRemaining,
-//                rightMakerAssetAmountRemaining,
-//                rightTakerAssetAmountRemaining
-//            );
-        } else {
-            matchedFillResults = _calculateMatchedFillResults(
-                leftOrder,
-                rightOrder,
-                leftMakerAssetAmountRemaining,
-                leftTakerAssetAmountRemaining,
-                rightMakerAssetAmountRemaining,
-                rightTakerAssetAmountRemaining
-            );
-        }
-
-        // Compute fees for left order
-        matchedFillResults.left.makerFeePaid = LibMathV06.safeGetPartialAmountFloor(
-            matchedFillResults.left.makerAssetFilledAmount,
-            leftOrder.makerAmount,
-            leftOrder.takerTokenFeeAmount
-        );
-        matchedFillResults.left.takerFeePaid = LibMathV06.safeGetPartialAmountFloor(
-            matchedFillResults.left.takerAssetFilledAmount,
-            leftOrder.takerAmount,
-            leftOrder.takerTokenFeeAmount
+        uint256 buyTakerAssetAmountRemaining = buyOrder.takerAmount.safeSub(buyOrderTakerAssetFilledAmount);
+        uint256 buyMakerAssetAmountRemaining = LibMathV06.safeGetPartialAmountFloor(
+            buyOrder.makerAmount,
+            buyOrder.takerAmount,
+            buyTakerAssetAmountRemaining
         );
 
-        // Compute fees for right order
-        matchedFillResults.right.makerFeePaid = LibMathV06.safeGetPartialAmountFloor(
-            matchedFillResults.right.makerAssetFilledAmount,
-            rightOrder.makerAmount,
-            rightOrder.takerTokenFeeAmount
-        );
-        matchedFillResults.right.takerFeePaid = LibMathV06.safeGetPartialAmountFloor(
-            matchedFillResults.right.takerAssetFilledAmount,
-            rightOrder.takerAmount,
-            rightOrder.takerTokenFeeAmount
-        );
 
-        // Compute the protocol fee that should be paid for a single fill. In this
-        // case this should be made the protocol fee for both the left and right orders.
-        uint256 protocolFee = gasPrice.safeMul(protocolFeeMultiplier);
-        matchedFillResults.left.protocolFeePaid = protocolFee;
-        matchedFillResults.right.protocolFeePaid = protocolFee;
-
-        // Return fill results
+        matchedFillResults = _calculateMatchedFillResults(
+            sellOrder,
+            buyOrder,
+            sellMakerAssetAmountRemaining,
+            sellTakerAssetAmountRemaining,
+            buyMakerAssetAmountRemaining,
+            buyTakerAssetAmountRemaining
+        );
         return matchedFillResults;
     }
 
     function _calculateMatchedFillResults(
-        LibNativeOrder.LimitOrder memory leftOrder,
-        LibNativeOrder.LimitOrder memory rightOrder,
-        uint256 leftMakerAssetAmountRemaining,
-        uint256 leftTakerAssetAmountRemaining,
-        uint256 rightMakerAssetAmountRemaining,
-        uint256 rightTakerAssetAmountRemaining
+        LibNativeOrder.LimitOrder memory sellOrder,
+        LibNativeOrder.LimitOrder memory buyOrder,
+        uint256 sellMakerAssetAmountRemaining,
+        uint256 sellTakerAssetAmountRemaining,
+        uint256 buyMakerAssetAmountRemaining,
+        uint256 buyTakerAssetAmountRemaining
     )
     private
     pure
     returns (LibNativeOrder.MatchedFillResults memory matchedFillResults)
     {
-        // Calculate fill results for maker and taker assets: at least one order will be fully filled.
-        // The maximum amount the left maker can buy is `leftTakerAssetAmountRemaining`
-        // The maximum amount the right maker can sell is `rightMakerAssetAmountRemaining`
-        // We have two distinct cases for calculating the fill results:
-        // Case 1.
-        //   If the left maker can buy more than the right maker can sell, then only the right order is fully filled.
-        //   If the left maker can buy exactly what the right maker can sell, then both orders are fully filled.
-        // Case 2.
-        //   If the left maker cannot buy more than the right maker can sell, then only the left order is fully filled.
-        // Case 3.
-        //   If the left maker can buy exactly as much as the right maker can sell, then both orders are fully filled.
-        if (leftTakerAssetAmountRemaining > rightMakerAssetAmountRemaining) {
-            // Case 1: Right order is fully filled
-            matchedFillResults = _calculateCompleteRightFill(
-                leftOrder,
-                rightMakerAssetAmountRemaining,
-                rightTakerAssetAmountRemaining
-            );
-        } else if (leftTakerAssetAmountRemaining < rightMakerAssetAmountRemaining) {
-            // Case 2: Left order is fully filled
-            matchedFillResults.left.makerAssetFilledAmount = leftMakerAssetAmountRemaining;
-            matchedFillResults.left.takerAssetFilledAmount = leftTakerAssetAmountRemaining;
-            matchedFillResults.right.makerAssetFilledAmount = leftTakerAssetAmountRemaining;
-            // Round up to ensure the maker's exchange rate does not exceed the price specified by the order.
-            // We favor the maker when the exchange rate must be rounded.
-            matchedFillResults.right.takerAssetFilledAmount = LibMathV06.safeGetPartialAmountCeil(
-                rightOrder.takerAmount,
-                rightOrder.makerAmount,
-                leftTakerAssetAmountRemaining // matchedFillResults.right.makerAssetFilledAmount
-            );
+        //price final is price of matchedFillResults - which always sell price.
+        uint256 priceFinal = sellTakerAssetAmountRemaining.safeDiv(sellMakerAssetAmountRemaining);
+        //if seller can sell more than buyer can buy. this final amount will calculate follow: 
+        if (sellMakerAssetAmountRemaining > buyTakerAssetAmountRemaining) {
+            matchedFillResults.makerAmountFinal = buyTakerAssetAmountRemaining;
+            matchedFillResults.takerAmountFinal = priceFinal.safeMul(buyTakerAssetAmountRemaining);
+            matchedFillResults.buyTakerRemainingAmountAfterMatch = 0;
+            matchedFillResults.buyMakerRemainingAmountAfterMatch = 0;
+            matchedFillResults.sellMakerRemainingAmountAfterMatch = sellMakerAssetAmountRemaining.safeSub(buyTakerAssetAmountRemaining);
+            matchedFillResults.sellTakerRemainingAmountAfterMatch = priceFinal.safeMul(matchedFillResults.sellMakerRemainingAmountAfterMatch);
+            matchedFillResults.changeMakerTokenForTaker = buyMakerAssetAmountRemaining.safeSub(matchedFillResults.takerAmountFinal);
+
         } else {
-            // leftTakerAssetAmountRemaining == rightMakerAssetAmountRemaining
-            // Case 3: Both orders are fully filled. Technically, this could be captured by the above cases, but
-            //         this calculation will be more precise since it does not include rounding.
-            matchedFillResults = _calculateCompleteFillBoth(
-                leftMakerAssetAmountRemaining,
-                leftTakerAssetAmountRemaining,
-                rightMakerAssetAmountRemaining,
-                rightTakerAssetAmountRemaining
+            matchedFillResults.makerAmountFinal = sellMakerAssetAmountRemaining;
+            matchedFillResults.takerAmountFinal = sellTakerAssetAmountRemaining;
+            matchedFillResults.sellMakerRemainingAmountAfterMatch = 0;
+            matchedFillResults.sellTakerRemainingAmountAfterMatch = 0;
+            matchedFillResults.buyTakerRemainingAmountAfterMatch = buyTakerAssetAmountRemaining.safeSub(matchedFillResults.makerAmountFinal);
+            matchedFillResults.buyMakerRemainingAmountAfterMatch = LibMathV06.safeGetPartialAmountFloor(
+                buyMakerAssetAmountRemaining,
+                buyTakerAssetAmountRemaining,
+                matchedFillResults.buyTakerRemainingAmountAfterMatch
             );
+            matchedFillResults.changeMakerTokenForTaker = buyMakerAssetAmountRemaining
+                                                            .safeSub(matchedFillResults.takerAmountFinal)
+                                                            .safeSub(matchedFillResults.buyMakerRemainingAmountAfterMatch);
         }
 
-        // Calculate amount given to taker
-        matchedFillResults.profitInLeftMakerAsset = matchedFillResults.left.makerAssetFilledAmount.safeSub(
-            matchedFillResults.right.takerAssetFilledAmount
-        );
-
         return matchedFillResults;
     }
 
-    function _calculateCompleteRightFill(
-        LibNativeOrder.LimitOrder memory leftOrder,
-        uint256 rightMakerAssetAmountRemaining,
-        uint256 rightTakerAssetAmountRemaining
-    )
-    private
-    pure
-    returns (LibNativeOrder.MatchedFillResults memory matchedFillResults)
-    {
-        matchedFillResults.right.makerAssetFilledAmount = rightMakerAssetAmountRemaining;
-        matchedFillResults.right.takerAssetFilledAmount = rightTakerAssetAmountRemaining;
-        matchedFillResults.left.takerAssetFilledAmount = rightMakerAssetAmountRemaining;
-        // Round down to ensure the left maker's exchange rate does not exceed the price specified by the order.
-        // We favor the left maker when the exchange rate must be rounded and the profit is being paid in the
-        // left maker asset.
-        matchedFillResults.left.makerAssetFilledAmount = LibMathV06.safeGetPartialAmountFloor(
-            leftOrder.makerAmount,
-            leftOrder.takerAmount,
-            rightMakerAssetAmountRemaining
-        );
-
-        return matchedFillResults;
-    }
-
-    function _calculateCompleteFillBoth(
-        uint256 leftMakerAssetAmountRemaining,
-        uint256 leftTakerAssetAmountRemaining,
-        uint256 rightMakerAssetAmountRemaining,
-        uint256 rightTakerAssetAmountRemaining
-    )
-    private
-    pure
-    returns (LibNativeOrder.MatchedFillResults memory matchedFillResults)
-    {
-        // Calculate the fully filled results for both orders.
-        matchedFillResults.left.makerAssetFilledAmount = leftMakerAssetAmountRemaining;
-        matchedFillResults.left.takerAssetFilledAmount = leftTakerAssetAmountRemaining;
-        matchedFillResults.right.makerAssetFilledAmount = rightMakerAssetAmountRemaining;
-        matchedFillResults.right.takerAssetFilledAmount = rightTakerAssetAmountRemaining;
-
-        return matchedFillResults;
-    }
     /// @dev Settles matched order by transferring appropriate funds between order makers, taker, and fee recipient.
-    /// @param leftOrderHash First matched order hash.
-    /// @param rightOrderHash Second matched order hash.
-    /// @param leftOrder First matched order.
-    /// @param rightOrder Second matched order.
+    /// @param sellOrderHash First matched order hash.
+    /// @param buyOrderHash Second matched order hash.
+    /// @param sellOrder First matched order.
+    /// @param buyOrder Second matched order.
     /// @param takerAddress Address that matched the orders. The taker receives the spread between orders as profit.
     /// @param matchedFillResults Struct holding amounts to transfer between makers, taker, and fee recipients.
     function _settleMatchedOrders(
-        bytes32 leftOrderHash,
-        bytes32 rightOrderHash,
-        LibNativeOrder.LimitOrder memory leftOrder,
-        LibNativeOrder.LimitOrder memory rightOrder,
+        bytes32 sellOrderHash,
+        bytes32 buyOrderHash,
+        LibNativeOrder.LimitOrder memory sellOrder,
+        LibNativeOrder.LimitOrder memory buyOrder,
         address takerAddress,
         LibNativeOrder.MatchedFillResults memory matchedFillResults
     )
         private
     {
-        address leftMakerAddress = leftOrder.maker;
-        address rightMakerAddress = rightOrder.maker;
-        address leftFeeRecipientAddress = leftOrder.feeRecipient;
-        address rightFeeRecipientAddress = rightOrder.feeRecipient;
+        address sellMakerAddress = sellOrder.maker;
+        address buyMakerAddress = buyOrder.maker;
+        address sellFeeRecipientAddress = sellOrder.feeRecipient;
+        address buyFeeRecipientAddress = buyOrder.feeRecipient;
+
+        console.log('sell maker');
+        console.log(sellOrder.makerAmount);
+
+        console.log('sell taker');
+        console.log(sellOrder.takerAmount);
+        
+        console.log('buy maker');
+        console.log(buyOrder.makerAmount);
+
+        console.log('buy taker');
+        console.log(buyOrder.takerAmount);
+
+        console.log('maker final');
+        console.log(matchedFillResults.makerAmountFinal);
+        
+        console.log('taker final');
+        console.log(matchedFillResults.takerAmountFinal);
+
+        console.log('change maker to buy');
+        console.log(matchedFillResults.changeMakerTokenForTaker);
+
+        console.log('sell taker fee');
+        console.log(sellOrder.takerTokenFeeAmount);
+
+        console.log('buy taker fee');
+        console.log(buyOrder.takerTokenFeeAmount);
+        
+        console.log('sell remaining taker');
+        console.log(matchedFillResults.sellTakerRemainingAmountAfterMatch);
+        
+        console.log('buy remaining taker');
+        console.log(matchedFillResults.buyTakerRemainingAmountAfterMatch);
+
+        console.log('sell receive');
+        console.log(matchedFillResults.takerAmountFinal.safeSub(sellOrder.takerTokenFeeAmount));
+
+        console.log('buy receive');
+        console.log(matchedFillResults.makerAmountFinal.safeSub(buyOrder.takerTokenFeeAmount));
 
         _transferERC20Tokens(
-            rightOrder.makerToken,
-            rightMakerAddress,
-            leftMakerAddress,
-            matchedFillResults.left.takerAssetFilledAmount
+            buyOrder.makerToken,
+            buyMakerAddress,
+            sellMakerAddress,
+            matchedFillResults.takerAmountFinal.safeSub(sellOrder.takerTokenFeeAmount)
+        );
+
+
+
+        _transferERC20Tokens(
+            sellOrder.makerToken,
+            sellMakerAddress,
+            buyMakerAddress,
+            matchedFillResults.makerAmountFinal.safeSub(buyOrder.takerTokenFeeAmount)
+        );
+
+
+
+        //fee for each order
+        _transferERC20Tokens(
+            buyOrder.takerToken,
+            buyMakerAddress,
+            buyFeeRecipientAddress,
+            buyOrder.takerTokenFeeAmount
         );
 
         _transferERC20Tokens(
-            leftOrder.makerToken,
-            leftMakerAddress,
-            rightMakerAddress,
-            matchedFillResults.right.takerAssetFilledAmount
+            sellOrder.takerToken,
+            sellMakerAddress,
+            sellFeeRecipientAddress,
+            sellOrder.takerTokenFeeAmount
         );
 
-        _transferERC20Tokens(
-            rightOrder.makerToken,
-            rightMakerAddress,
-            rightFeeRecipientAddress,
-            matchedFillResults.right.makerFeePaid
-        );
+        //return change for each side (using for lock balance after).
 
-        _transferERC20Tokens(
-            leftOrder.makerToken,
-            leftMakerAddress,
-            leftFeeRecipientAddress,
-            matchedFillResults.left.makerFeePaid
-        );
+        // _transferERC20Tokens(
+        //     buyOrder.makerToken,
+        //     buyMakerAddress,
+        //     takerAddress,
+        //     matchedFillResults.changeMakerTokenForTaker
+        // );
 
-        _transferERC20Tokens(
-            leftOrder.makerToken,
-            leftMakerAddress,
-            takerAddress,
-            matchedFillResults.profitInLeftMakerAsset
-        );
-
-        _transferERC20Tokens(
-            rightOrder.makerToken,
-            rightMakerAddress,
-            takerAddress,
-            matchedFillResults.profitInRightMakerAsset
-        );
-
-        //todo: pay protocol
-        bool didPayProtocolFees = false;
-
-        // Pay protocol fees for each maker
-//        bool didPayProtocolFees = _payTwoProtocolFees(
-//            leftOrderHash,
-//            rightOrderHash,
-//            matchedFillResults.left.protocolFeePaid,
-//            leftMakerAddress,
-//            rightMakerAddress,
-//            takerAddress
-//        );
-
-
-        // Protocol fees are not paid if the protocolFeeCollector contract is not set
-        if (!didPayProtocolFees) {
-            matchedFillResults.left.protocolFeePaid = 0;
-            matchedFillResults.right.protocolFeePaid = 0;
-        }
-
-        // Settle taker fees.
-        if (
-            leftFeeRecipientAddress == rightFeeRecipientAddress &&
-            leftOrder.takerTokenFeeAmount == rightOrder.takerTokenFeeAmount
-        ) {
-            // Fee recipients and taker fee assets are identical, so we can
-            // transfer them in one go.
-
-            _transferERC20Tokens(
-                leftOrder.makerToken,
-                takerAddress,
-                leftFeeRecipientAddress,
-                matchedFillResults.left.takerFeePaid.safeAdd(matchedFillResults.right.takerFeePaid)
-            );
-        } else {
-            // Right taker fee -> right fee recipient
-
-            _transferERC20Tokens(
-                leftOrder.makerToken,
-                takerAddress,
-                leftFeeRecipientAddress,
-                matchedFillResults.left.takerFeePaid
-            );
-
-
-            _transferERC20Tokens(
-                rightOrder.takerToken,
-                takerAddress,
-                rightFeeRecipientAddress,
-                matchedFillResults.right.takerFeePaid
-            );
-        }
     }
 
     function _updateFilledState(
@@ -618,17 +479,15 @@ contract MatchOrdersFeature is
         address takerAddress,
         bytes32 orderHash,
         uint256 orderTakerAssetFilledAmount,
-        LibNativeOrder.FillResults memory fillResults
+        uint256 makerAmountFinal,
+        uint256 takerAmountFinal,
+        uint256 takerRemainingAmount
     )
     private
     {
-
         LibNativeOrdersStorage
         .getStorage()
-        .orderHashToTakerTokenFilledAmount[orderHash] =
-        // OK to overwrite the whole word because we shouldn't get to this
-        // function if the order is cancelled.
-        orderTakerAssetFilledAmount.safeAdd(fillResults.takerAssetFilledAmount);
+        .orderHashToTakerTokenFilledAmount[orderHash] = takerRemainingAmount;
         // Update state
 
         emit Fill(
@@ -639,11 +498,9 @@ contract MatchOrdersFeature is
             orderHash,
             takerAddress,
             msg.sender,
-            fillResults.makerAssetFilledAmount,
-            fillResults.takerAssetFilledAmount,
-            fillResults.makerFeePaid,
-            fillResults.takerFeePaid,
-            fillResults.protocolFeePaid
+            makerAmountFinal,
+            takerAmountFinal,
+            takerRemainingAmount
         );
     }
 
@@ -653,15 +510,6 @@ contract MatchOrdersFeature is
     {
         _registerFeatureFunction(this.matchOrders.selector);
         _registerFeatureFunction(this.testMatch.selector);
-        // _registerFeatureFunction(this._assertValidMatch.selector);
-        // _registerFeatureFunction(this._matchOrders.selector);
-        // _registerFeatureFunction(this.getOrderInfo.selector);
-        // _registerFeatureFunction(this._assertFillableOrder.selector);
-        // _registerFeatureFunction(this.calculateMatchedFillResults.selector);
-        // _registerFeatureFunction(this._calculateMatchedFillResults.selector);
-        // _registerFeatureFunction(this._calculateCompleteRightFill.selector);
-        // _registerFeatureFunction(this._calculateCompleteFillBoth.selector);
-        // _registerFeatureFunction(this._settleMatchedOrders.selector);
         return LibMigrate.MIGRATE_SUCCESS;
     }
 }
